@@ -2,6 +2,8 @@
 
 CLI that parses a Java codebase into a semantic knowledge graph stored in SQLite. Use it to explore structure, dependencies, and communities — locally, without a server.
 
+Inspired by [Graphify](https://github.com/safishamsi/graphify).
+
 ## Prerequisites
 
 - **JDK 21+** and **Maven**
