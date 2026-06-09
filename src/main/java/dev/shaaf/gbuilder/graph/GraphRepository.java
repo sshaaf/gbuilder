@@ -16,6 +16,20 @@ public interface GraphRepository {
 
     void persistClassNode(ClassNode node);
 
+    void persistClassNodesChunk(List<ClassNode> nodes);
+
+    void createCallEdgesChunk(List<PendingCallEdge> edges);
+
+    void createStructuralEdgesChunk(List<PendingStructuralEdge> edges);
+
+    void storeEmbeddingsChunk(List<PendingEmbedding> embeddings);
+
+    record PendingCallEdge(String callerSignature, String callerClassName, String calleeName) {}
+
+    record PendingStructuralEdge(String type, String fromFqn, String toFqn, double weight) {}
+
+    record PendingEmbedding(String classFqn, String methodSignature, float[] vector, EmbeddingKind kind) {}
+
     void createExtendsEdge(String childFqn, String parentFqn);
 
     void createImplementsEdge(String classFqn, String interfaceFqn);

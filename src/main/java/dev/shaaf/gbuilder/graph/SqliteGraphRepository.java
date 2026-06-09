@@ -59,14 +59,102 @@ public class SqliteGraphRepository implements GraphRepository {
 
     @Override
     public void persistClassNode(ClassNode node) {
+        persistClassNodesChunk(List.of(node));
+    }
+
+    @Override
+    public void persistClassNodesChunk(List<ClassNode> nodes) {
+        if (nodes == null || nodes.isEmpty()) {
+            return;
+        }
         withWriteConnection(conn -> {
-            upsertClassNode(conn, node);
-            for (MethodNode method : node.methods()) {
-                upsertMethodNode(conn, node.fullyQualifiedName(), method);
-                insertEdge(conn, "CONTAINS",
-                        GraphNodeIds.classId(node.fullyQualifiedName()),
-                        GraphNodeIds.methodId(node.fullyQualifiedName(), method.signature()),
-                        1.0);
+            for (ClassNode node : nodes) {
+                upsertClassNode(conn, node);
+                for (MethodNode method : node.methods()) {
+                    upsertMethodNode(conn, node.fullyQualifiedName(), method);
+                    insertEdge(conn, "CONTAINS",
+                            GraphNodeIds.classId(node.fullyQualifiedName()),
+                            GraphNodeIds.methodId(node.fullyQualifiedName(), method.signature()),
+                            1.0);
+                }
+            }
+            return null;
+        });
+    }
+
+    @Override
+    public void createCallEdgesChunk(List<PendingCallEdge> edges) {
+        if (edges == null || edges.isEmpty()) {
+            return;
+        }
+        withWriteConnection(conn -> {
+            try (PreparedStatement ps = conn.prepareStatement("""
+                    SELECT id FROM nodes
+                    WHERE kind = 'METHOD' AND fqn = ? AND json_extract(data, '$.name') = ?
+                    """)) {
+                for (PendingCallEdge edge : edges) {
+                    String callerId = GraphNodeIds.methodId(edge.callerClassName(), edge.callerSignature());
+                    ps.setString(1, edge.callerClassName());
+                    ps.setString(2, edge.calleeName());
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next()) {
+                            insertEdge(conn, "CALLS", callerId, rs.getString("id"), 2.0);
+                        }
+                    }
+                }
+            }
+            return null;
+        });
+    }
+
+    @Override
+    public void createStructuralEdgesChunk(List<PendingStructuralEdge> edges) {
+        if (edges == null || edges.isEmpty()) {
+            return;
+        }
+        withWriteConnection(conn -> {
+            for (PendingStructuralEdge edge : edges) {
+                switch (edge.type()) {
+                    case "EXTENDS" -> {
+                        ensureExternalClass(conn, edge.toFqn(), ClassKind.CLASS);
+                        insertEdge(conn, "EXTENDS",
+                                GraphNodeIds.classId(edge.fromFqn()),
+                                GraphNodeIds.classId(edge.toFqn()),
+                                edge.weight());
+                    }
+                    case "IMPLEMENTS" -> {
+                        ensureExternalClass(conn, edge.toFqn(), ClassKind.INTERFACE);
+                        insertEdge(conn, "IMPLEMENTS",
+                                GraphNodeIds.classId(edge.fromFqn()),
+                                GraphNodeIds.classId(edge.toFqn()),
+                                edge.weight());
+                    }
+                    case "DEPENDS_ON" -> insertEdge(conn, "DEPENDS_ON",
+                            GraphNodeIds.classId(edge.fromFqn()),
+                            GraphNodeIds.classId(edge.toFqn()),
+                            edge.weight());
+                    default -> throw new IllegalArgumentException("Unknown structural edge type: " + edge.type());
+                }
+            }
+            return null;
+        });
+    }
+
+    @Override
+    public void storeEmbeddingsChunk(List<PendingEmbedding> embeddings) {
+        if (embeddings == null || embeddings.isEmpty()) {
+            return;
+        }
+        withWriteConnection(conn -> {
+            for (PendingEmbedding embedding : embeddings) {
+                if (embedding.vector() == null || embedding.vector().length == 0) {
+                    continue;
+                }
+                String nodeId = embedding.kind() == EmbeddingKind.CLASS
+                        ? GraphNodeIds.classId(embedding.classFqn())
+                        : GraphNodeIds.methodId(embedding.classFqn(), embedding.methodSignature());
+                String model = embedding.kind() == EmbeddingKind.CLASS ? "class" : "method";
+                upsertEmbedding(conn, nodeId, embedding.vector(), model);
             }
             return null;
         });
@@ -92,22 +180,7 @@ public class SqliteGraphRepository implements GraphRepository {
 
     @Override
     public void createCallEdge(String callerSignature, String callerClassName, String calleeName) {
-        withWriteConnection(conn -> {
-            String callerId = GraphNodeIds.methodId(callerClassName, callerSignature);
-            try (PreparedStatement ps = conn.prepareStatement("""
-                    SELECT id FROM nodes
-                    WHERE kind = 'METHOD' AND fqn = ? AND json_extract(data, '$.name') = ?
-                    """)) {
-                ps.setString(1, callerClassName);
-                ps.setString(2, calleeName);
-                try (ResultSet rs = ps.executeQuery()) {
-                    while (rs.next()) {
-                        insertEdge(conn, "CALLS", callerId, rs.getString("id"), 2.0);
-                    }
-                }
-            }
-            return null;
-        });
+        createCallEdgesChunk(List.of(new PendingCallEdge(callerSignature, callerClassName, calleeName)));
     }
 
     @Override
@@ -231,10 +304,7 @@ public class SqliteGraphRepository implements GraphRepository {
         if (vector == null || vector.length == 0) {
             return;
         }
-        withWriteConnection(conn -> {
-            upsertEmbedding(conn, GraphNodeIds.classId(fqn), vector, "class");
-            return null;
-        });
+        storeEmbeddingsChunk(List.of(new PendingEmbedding(fqn, null, vector, EmbeddingKind.CLASS)));
     }
 
     @Override
@@ -242,10 +312,8 @@ public class SqliteGraphRepository implements GraphRepository {
         if (vector == null || vector.length == 0) {
             return;
         }
-        withWriteConnection(conn -> {
-            upsertEmbedding(conn, GraphNodeIds.methodId(className, signature), vector, "method");
-            return null;
-        });
+        storeEmbeddingsChunk(List.of(
+                new PendingEmbedding(className, signature, vector, EmbeddingKind.METHOD)));
     }
 
     @Override

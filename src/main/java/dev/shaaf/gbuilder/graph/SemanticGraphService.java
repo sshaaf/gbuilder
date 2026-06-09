@@ -88,6 +88,9 @@ public class SemanticGraphService {
     @Inject
     TokenBenchmarkService tokenBenchmarkService;
 
+    @Inject
+    GraphPersistConfig persistConfig;
+
     private List<ClassNode> lastBuildNodes = List.of();
     private final ConcurrentHashMap<String, ReentrantLock> nodeLocks = new ConcurrentHashMap<>();
 
@@ -129,10 +132,7 @@ public class SemanticGraphService {
                 .map(ClassNode::fullyQualifiedName)
                 .collect(java.util.stream.Collectors.toSet());
 
-        for (ClassNode classNode : classNodes) {
-            buildInheritanceEdges(classNode);
-            buildDependsOnEdges(classNode, knownFqns);
-        }
+        buildStructuralEdges(classNodes, knownFqns);
 
         AnalysisResult analysisResult = analyzerService.analyze(classNodes);
 
@@ -149,11 +149,9 @@ public class SemanticGraphService {
         int embeddedMethods = 0;
         int embeddedClasses = 0;
         if (embeddingService.isEnabled()) {
-            for (ClassNode classNode : classNodes) {
-                var result2 = enrichWithEmbeddings(classNode);
-                embeddedMethods += result2.methods;
-                embeddedClasses += result2.classes;
-            }
+            var embeddingStats = persistEmbeddings(classNodes);
+            embeddedMethods = embeddingStats.methods;
+            embeddedClasses = embeddingStats.classes;
         }
 
         lastBuildNodes = classNodes;
@@ -235,9 +233,74 @@ public class SemanticGraphService {
     }
 
     private void persistGraph(List<ClassNode> classNodes) {
+        flushInChunks(classNodes, persistConfig.persistBatchSize(), graphRepo::persistClassNodesChunk);
+
+        List<GraphRepository.PendingCallEdge> callEdges = new ArrayList<>();
         for (ClassNode classNode : classNodes) {
-            graphRepo.persistClassNode(classNode);
-            buildCallEdges(classNode);
+            collectCallEdges(classNode, callEdges);
+        }
+        flushInChunks(callEdges, persistConfig.edgeBatchSize(), graphRepo::createCallEdgesChunk);
+    }
+
+    private void buildStructuralEdges(List<ClassNode> classNodes, java.util.Set<String> knownFqns) {
+        List<GraphRepository.PendingStructuralEdge> edges = new ArrayList<>();
+        for (ClassNode classNode : classNodes) {
+            if (classNode.superClass() != null) {
+                edges.add(new GraphRepository.PendingStructuralEdge(
+                        "EXTENDS", classNode.fullyQualifiedName(), classNode.superClass(), 1.0));
+            }
+            for (String iface : classNode.interfaces()) {
+                edges.add(new GraphRepository.PendingStructuralEdge(
+                        "IMPLEMENTS", classNode.fullyQualifiedName(), iface, 1.0));
+            }
+            for (String imp : classNode.imports()) {
+                if (knownFqns.contains(imp)) {
+                    edges.add(new GraphRepository.PendingStructuralEdge(
+                            "DEPENDS_ON", classNode.fullyQualifiedName(), imp, 3.0));
+                }
+            }
+        }
+        flushInChunks(edges, persistConfig.edgeBatchSize(), graphRepo::createStructuralEdgesChunk);
+    }
+
+    private EmbeddingStats persistEmbeddings(List<ClassNode> classNodes) {
+        List<EmbeddingService.ClassEmbeddingVectors> vectors = embeddingService.embedClassNodes(classNodes);
+        List<GraphRepository.PendingEmbedding> pending = new ArrayList<>();
+        int embeddedMethods = 0;
+        int embeddedClasses = 0;
+
+        for (EmbeddingService.ClassEmbeddingVectors classVectors : vectors) {
+            for (EmbeddingService.MethodEmbeddingVector methodVector : classVectors.methods()) {
+                if (methodVector.vector().length > 0) {
+                    pending.add(new GraphRepository.PendingEmbedding(
+                            classVectors.classFqn(),
+                            methodVector.signature(),
+                            methodVector.vector(),
+                            GraphRepository.EmbeddingKind.METHOD));
+                    embeddedMethods++;
+                }
+            }
+            if (classVectors.classVector().length > 0) {
+                pending.add(new GraphRepository.PendingEmbedding(
+                        classVectors.classFqn(),
+                        null,
+                        classVectors.classVector(),
+                        GraphRepository.EmbeddingKind.CLASS));
+                embeddedClasses++;
+            }
+        }
+
+        flushInChunks(pending, persistConfig.edgeBatchSize(), graphRepo::storeEmbeddingsChunk);
+        return new EmbeddingStats(embeddedMethods, embeddedClasses);
+    }
+
+    private <T> void flushInChunks(List<T> items, int chunkSize, java.util.function.Consumer<List<T>> writer) {
+        if (items.isEmpty()) {
+            return;
+        }
+        int size = Math.max(1, chunkSize);
+        for (int i = 0; i < items.size(); i += size) {
+            writer.accept(items.subList(i, Math.min(i + size, items.size())));
         }
     }
 
@@ -297,35 +360,6 @@ public class SemanticGraphService {
     }
 
     private record EmbeddingStats(int methods, int classes) {}
-
-    private EmbeddingStats enrichWithEmbeddings(ClassNode node) {
-        List<String> methodBodies = node.methods().stream()
-                .map(MethodNode::rawBody)
-                .map(b -> b != null ? b : "")
-                .toList();
-
-        List<float[]> vectors = embeddingService.embedBatch(methodBodies);
-
-        int embeddedCount = 0;
-        for (int i = 0; i < node.methods().size(); i++) {
-            MethodNode m = node.methods().get(i);
-            float[] vec = vectors.get(i);
-            if (vec.length > 0) {
-                graphRepo.storeMethodEmbedding(m.signature(), node.fullyQualifiedName(), vec);
-                embeddedCount++;
-            }
-        }
-
-        String classBody = String.join("\n", methodBodies);
-        float[] classVector = embeddingService.embedSingle(classBody);
-        int classEmbedded = 0;
-        if (classVector.length > 0) {
-            graphRepo.storeClassEmbedding(node.fullyQualifiedName(), classVector);
-            classEmbedded = 1;
-        }
-
-        return new EmbeddingStats(embeddedCount, classEmbedded);
-    }
 
     /**
      * Builds the Surgical AST Context JSON for a specific method, giving the Coder agent
@@ -561,28 +595,11 @@ public class SemanticGraphService {
         return objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(root);
     }
 
-    private void buildCallEdges(ClassNode node) {
+    private void collectCallEdges(ClassNode node, List<GraphRepository.PendingCallEdge> edges) {
         for (MethodNode method : node.methods()) {
             for (String calledMethod : method.internalMethodCalls()) {
-                graphRepo.createCallEdge(
-                        method.signature(), node.fullyQualifiedName(), calledMethod);
-            }
-        }
-    }
-
-    private void buildInheritanceEdges(ClassNode node) {
-        if (node.superClass() != null) {
-            graphRepo.createExtendsEdge(node.fullyQualifiedName(), node.superClass());
-        }
-        for (String iface : node.interfaces()) {
-            graphRepo.createImplementsEdge(node.fullyQualifiedName(), iface);
-        }
-    }
-
-    private void buildDependsOnEdges(ClassNode node, java.util.Set<String> knownFqns) {
-        for (String imp : node.imports()) {
-            if (knownFqns.contains(imp)) {
-                graphRepo.createDependsOnEdge(node.fullyQualifiedName(), imp);
+                edges.add(new GraphRepository.PendingCallEdge(
+                        method.signature(), node.fullyQualifiedName(), calledMethod));
             }
         }
     }

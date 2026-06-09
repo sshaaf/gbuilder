@@ -1,5 +1,6 @@
 package dev.shaaf.gbuilder.lang.java;
 
+import com.github.javaparser.JavaParser;
 import com.github.javaparser.ParserConfiguration;
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
@@ -25,6 +26,12 @@ import java.util.Map;
 public class JavaParserExtractor implements ClassNodeExtractor {
 
     private static final Logger LOG = Logger.getLogger(JavaParserExtractor.class);
+
+    private static final ParserConfiguration PARSER_CONFIGURATION = new ParserConfiguration()
+            .setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_21);
+
+    private static final ThreadLocal<JavaParser> THREAD_LOCAL_PARSER =
+            ThreadLocal.withInitial(() -> new JavaParser(PARSER_CONFIGURATION));
 
     @PostConstruct
     void configureParser() {
@@ -78,7 +85,10 @@ public class JavaParserExtractor implements ClassNodeExtractor {
     }
 
     public List<ClassNode> parseFile(Path filePath) throws IOException {
-        CompilationUnit cu = StaticJavaParser.parse(filePath);
+        CompilationUnit cu = THREAD_LOCAL_PARSER.get()
+                .parse(filePath)
+                .getResult()
+                .orElseThrow(() -> new IOException("Failed to parse: " + filePath));
         String packageName = cu.getPackageDeclaration()
                 .map(pd -> pd.getNameAsString())
                 .orElse("");
