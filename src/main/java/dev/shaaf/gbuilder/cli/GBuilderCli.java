@@ -17,7 +17,7 @@ import java.util.concurrent.Callable;
         name = "gbuilder",
         description = "Parse a Java codebase and build the semantic knowledge graph",
         mixinStandardHelpOptions = true,
-        version = "1.0.0-SNAPSHOT",
+        versionProvider = GbuilderVersionProvider.class,
         subcommands = {
                 QueryCommand.class,
                 PathCommand.class,

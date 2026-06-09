@@ -150,15 +150,15 @@ jobs:
         shell: bash
         run: |
           mkdir -p target/dist
-          cp target/gbuilder-*-runner "target/dist/gbuilder-${{ matrix.platform }}"
-          chmod +x "target/dist/gbuilder-${{ matrix.platform }}"
+          cp target/gbuilder-*-runner target/dist/gbuilder
+          chmod +x target/dist/gbuilder
 
       - name: Stage native binary (Windows)
         if: runner.os == 'Windows'
         shell: bash
         run: |
           mkdir -p target/dist
-          cp target/gbuilder-*-runner.exe "target/dist/gbuilder-${{ matrix.platform }}.exe"
+          cp target/gbuilder-*-runner.exe target/dist/gbuilder.exe
 
       - name: Upload native executable
         uses: actions/upload-artifact@v7
