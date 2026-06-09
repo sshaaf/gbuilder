@@ -1,0 +1,169 @@
+# Build, test, and publish gbuilder artifacts (uber-jar + native per OS).
+# Action versions (2026-06): checkout@v6, setup-java@v5, upload-artifact@v7,
+# graalvm/setup-graalvm@v1, msvc-dev-cmd@v1
+
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  JAVA_VERSION: "21"
+  MAVEN_ARGS: >-
+    -B
+    --no-transfer-progress
+    -Dmaven.compiler.release=21
+  TREE_SITTER4J_REPO: https://github.com/andreaTP/tree-sitter4j.git
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Install tree-sitter4j
+        run: |
+          git clone --depth 1 "${TREE_SITTER4J_REPO}" "${RUNNER_TEMP}/tree-sitter4j"
+          mvn -B -f "${RUNNER_TEMP}/tree-sitter4j/pom.xml" install -DskipTests
+
+      - name: Run tests
+        run: mvn verify ${{ env.MAVEN_ARGS }}
+
+  uberjar:
+    name: Uber-jar
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Install tree-sitter4j
+        run: |
+          git clone --depth 1 "${TREE_SITTER4J_REPO}" "${RUNNER_TEMP}/tree-sitter4j"
+          mvn -B -f "${RUNNER_TEMP}/tree-sitter4j/pom.xml" install -DskipTests
+
+      - name: Build uber-jar
+        run: >-
+          mvn package ${{ env.MAVEN_ARGS }}
+          -DskipTests
+          -Dquarkus.package.jar.type=uber-jar
+
+      - name: Upload uber-jar
+        uses: actions/upload-artifact@v7
+        with:
+          name: gbuilder-uberjar
+          path: target/gbuilder-*-runner.jar
+          if-no-files-found: error
+          retention-days: 14
+
+  native:
+    name: Native (${{ matrix.platform }})
+    needs: test
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-amd64
+          - os: macos-latest
+            platform: macos-aarch64
+          - os: windows-latest
+            platform: windows-amd64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up GraalVM
+        uses: graalvm/setup-graalvm@v1
+        with:
+          distribution: graalvm-community
+          java-version: ${{ env.JAVA_VERSION }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cache: maven
+          set-java-home: true
+
+      - name: Set up MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install tree-sitter4j
+        shell: bash
+        run: |
+          git clone --depth 1 "${TREE_SITTER4J_REPO}" "${RUNNER_TEMP}/tree-sitter4j"
+          mvn -B -f "${RUNNER_TEMP}/tree-sitter4j/pom.xml" install -DskipTests
+
+      - name: Build native executable (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        env:
+          MAVEN_OPTS: -Xmx4g
+        run: >-
+          mvn package ${{ env.MAVEN_ARGS }}
+          -Dnative
+          -DskipTests
+          -DskipITs
+
+      - name: Build native executable (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          MAVEN_OPTS: -Xmx4g
+        run: >-
+          mvn package ${{ env.MAVEN_ARGS }}
+          -Dnative
+          -DskipTests
+          -DskipITs
+
+      - name: Stage native binary (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p target/dist
+          cp target/gbuilder-*-runner "target/dist/gbuilder-${{ matrix.platform }}"
+          chmod +x "target/dist/gbuilder-${{ matrix.platform }}"
+
+      - name: Stage native binary (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p target/dist
+          cp target/gbuilder-*-runner.exe "target/dist/gbuilder-${{ matrix.platform }}.exe"
+
+      - name: Upload native executable
+        uses: actions/upload-artifact@v7
+        with:
+          name: gbuilder-native-${{ matrix.platform }}
+          path: target/dist/*
+          if-no-files-found: error
+          retention-days: 14
