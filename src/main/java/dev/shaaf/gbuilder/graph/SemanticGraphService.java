@@ -4,6 +4,15 @@ import dev.shaaf.gbuilder.analyzer.AnalyzerService;
 import dev.shaaf.gbuilder.analyzer.model.AnalysisResult;
 import dev.shaaf.gbuilder.lang.ParserBackend;
 import dev.shaaf.gbuilder.lang.ParserFacade;
+import dev.shaaf.gbuilder.graph.analysis.GraphAnalysisResult;
+import dev.shaaf.gbuilder.graph.analysis.GraphAnalyzer;
+import dev.shaaf.gbuilder.graph.benchmark.TokenBenchmarkService;
+import dev.shaaf.gbuilder.graph.diff.GraphDiffResult;
+import dev.shaaf.gbuilder.graph.diff.GraphDiffService;
+import dev.shaaf.gbuilder.graph.export.GraphExportService;
+import dev.shaaf.gbuilder.graph.manifest.GraphManifestService;
+import dev.shaaf.gbuilder.graph.report.GraphReportGenerator;
+import dev.shaaf.gbuilder.graph.semantic.SemanticEdgeService;
 import dev.shaaf.gbuilder.graph.model.ClassKind;
 import dev.shaaf.gbuilder.graph.model.ClassNode;
 import dev.shaaf.gbuilder.graph.model.FieldNode;
@@ -18,8 +27,10 @@ import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -56,62 +67,183 @@ public class SemanticGraphService {
     @Inject
     ObjectMapper objectMapper;
 
+    @Inject
+    GraphManifestService manifestService;
+
+    @Inject
+    GraphDiffService diffService;
+
+    @Inject
+    GraphReportGenerator reportGenerator;
+
+    @Inject
+    GraphAnalyzer graphAnalyzer;
+
+    @Inject
+    GraphExportService exportService;
+
+    @Inject
+    SemanticEdgeService semanticEdgeService;
+
+    @Inject
+    TokenBenchmarkService tokenBenchmarkService;
+
     private List<ClassNode> lastBuildNodes = List.of();
     private final ConcurrentHashMap<String, ReentrantLock> nodeLocks = new ConcurrentHashMap<>();
 
-    public GraphBuildResult buildGraph(Path codebaseRoot) throws IOException {
-        return buildGraph(codebaseRoot, ParserBackend.JPARSER);
+    public GraphBuildOutcome buildGraph(Path codebaseRoot) throws IOException {
+        return buildGraph(codebaseRoot, ParserBackend.JPARSER, GraphBuildOptions.defaults());
     }
 
-    public GraphBuildResult buildGraph(Path codebaseRoot, ParserBackend parserBackend) throws IOException {
-        LOG.infof("Building semantic graph from: %s using parser backend: %s",
-                codebaseRoot, parserBackend.cliValue());
+    public GraphBuildOutcome buildGraph(Path codebaseRoot, ParserBackend parserBackend) throws IOException {
+        return buildGraph(codebaseRoot, parserBackend, GraphBuildOptions.defaults());
+    }
+
+    public GraphBuildOutcome buildGraph(Path codebaseRoot, ParserBackend parserBackend,
+                                        GraphBuildOptions options) throws IOException {
+        LOG.infof("Building semantic graph from: %s using parser backend: %s (incremental=%s)",
+                codebaseRoot, parserBackend.cliValue(), options.incremental());
 
         graphRepo.setStoreRoot(codebaseRoot);
-        graphRepo.clearAll();
+        long start = System.currentTimeMillis();
 
-        List<ClassNode> classNodes = parserFacade.extract(codebaseRoot, parserBackend);
+        if (options.clusterOnly()) {
+            return clusterOnly(codebaseRoot, parserBackend, start);
+        }
 
+        Optional<GraphDiffService.GraphSnapshot> snapshotBefore = options.incremental()
+                ? Optional.of(diffService.snapshot())
+                : Optional.empty();
+
+        List<ClassNode> classNodes;
+        if (options.incremental()) {
+            classNodes = buildIncremental(codebaseRoot, parserBackend);
+        } else {
+            graphRepo.clearAll();
+            classNodes = parserFacade.extract(codebaseRoot, parserBackend);
+            persistGraph(classNodes);
+        }
+
+        classNodes = graphRepo.findAllClassNodes();
         java.util.Set<String> knownFqns = classNodes.stream()
                 .map(ClassNode::fullyQualifiedName)
                 .collect(java.util.stream.Collectors.toSet());
 
-        // Pass 1: persist all nodes and intra-class edges (CONTAINS, CALLS)
-        for (ClassNode classNode : classNodes) {
-            graphRepo.persistClassNode(classNode);
-            buildCallEdges(classNode);
-        }
-
-        // Pass 2: cross-class edges require all internal nodes to exist first.
-        // Inheritance edges create phantom nodes for external types.
         for (ClassNode classNode : classNodes) {
             buildInheritanceEdges(classNode);
             buildDependsOnEdges(classNode, knownFqns);
         }
 
-        // Pass 3: technology detection — analyze all class nodes with pluggable rules
         AnalysisResult analysisResult = analyzerService.analyze(classNodes);
 
-        // Pass 4: community detection for migration slices and LLM context bundling
+        if (options.deepMode()) {
+            int semantic = semanticEdgeService.addSemanticSimilarityEdges(classNodes);
+            semanticEdgeService.addTechnologyHyperedges(classNodes);
+            LOG.infof("Deep mode: added %d semantic similarity edges", semantic);
+        }
+
+        communityDetector.setClusteringAlgorithm(options.clusteringAlgorithm());
         var communities = communityDetector.detectAndAssign();
         int communityCount = new java.util.HashSet<>(communities.values()).size();
 
-        // Pass 5: embedding enrichment (optional — requires LLM API key)
         int embeddedMethods = 0;
         int embeddedClasses = 0;
         if (embeddingService.isEnabled()) {
-            LOG.info("Embedding enrichment enabled — generating vectors for method bodies");
             for (ClassNode classNode : classNodes) {
                 var result2 = enrichWithEmbeddings(classNode);
                 embeddedMethods += result2.methods;
                 embeddedClasses += result2.classes;
             }
-            LOG.infof("Embedded %d methods across %d classes", embeddedMethods, embeddedClasses);
-        } else {
-            LOG.info("Embedding enrichment disabled — skipping vector generation");
         }
 
         lastBuildNodes = classNodes;
+        manifestService.saveManifest(codebaseRoot, manifestService.scanCurrentHashes(codebaseRoot));
+
+        GraphBuildResult buildResult = toBuildResult(classNodes, analysisResult, embeddedMethods,
+                embeddedClasses, communityCount, parserBackend);
+
+        GraphAnalysisResult graphAnalysis = graphAnalyzer.analyze();
+        GraphDiffResult diff = snapshotBefore
+                .map(before -> diffService.compute(before, diffService.snapshot()))
+                .orElse(null);
+
+        long duration = System.currentTimeMillis() - start;
+        reportGenerator.writeReport(codebaseRoot, buildResult, options, duration, diff, graphAnalysis);
+        exportService.exportGraphJson(codebaseRoot);
+        if (!options.skipVisualization()) {
+            exportService.exportHtml(codebaseRoot, graphAnalysis);
+        }
+        if (options.generateWiki()) {
+            exportService.exportWiki(codebaseRoot, graphAnalysis);
+        }
+        if (options.exportSvg()) {
+            exportService.exportSvg(codebaseRoot);
+        }
+        if (options.exportGraphml()) {
+            exportService.exportGraphMl(codebaseRoot);
+        }
+        if (options.exportNeo4j()) {
+            exportService.exportNeo4jCypher(codebaseRoot);
+        }
+
+        TokenBenchmarkService.BenchmarkResult benchmark = null;
+        if (options.benchmark() && classNodes.size() >= 5) {
+            benchmark = tokenBenchmarkService.benchmark(codebaseRoot, classNodes);
+        }
+
+        return new GraphBuildOutcome(buildResult, diff, graphAnalysis, benchmark, duration);
+    }
+
+    public GraphBuildOutcome clusterOnly(Path codebaseRoot, ParserBackend parserBackend, long startTime)
+            throws IOException {
+        graphRepo.setStoreRoot(codebaseRoot);
+        communityDetector.detectAndAssign();
+        List<ClassNode> classNodes = graphRepo.findAllClassNodes();
+        GraphAnalysisResult graphAnalysis = graphAnalyzer.analyze();
+        GraphBuildResult buildResult = toBuildResult(classNodes, null, 0, 0,
+                graphAnalysis.communities().size(), parserBackend);
+        long duration = System.currentTimeMillis() - startTime;
+        GraphBuildOptions options = GraphBuildOptions.defaults().withClusterOnly(true);
+        reportGenerator.writeReport(codebaseRoot, buildResult, options, duration, null, graphAnalysis);
+        exportService.exportGraphJson(codebaseRoot);
+        return new GraphBuildOutcome(buildResult, null, graphAnalysis, null, duration);
+    }
+
+    private List<ClassNode> buildIncremental(Path codebaseRoot, ParserBackend parserBackend) throws IOException {
+        GraphManifestService.ManifestDiff diff = manifestService.diff(codebaseRoot);
+        if (!diff.hasChanges()) {
+            LOG.info("No file changes detected — skipping parse");
+            return graphRepo.findAllClassNodes();
+        }
+
+        List<String> pathsToRemove = new ArrayList<>();
+        for (String rel : diff.deleted()) {
+            pathsToRemove.add(codebaseRoot.resolve(rel).toAbsolutePath().toString());
+        }
+        for (String rel : diff.changed()) {
+            pathsToRemove.add(codebaseRoot.resolve(rel).toAbsolutePath().toString());
+        }
+        graphRepo.removeNodesByFilePaths(pathsToRemove);
+
+        List<Path> toParse = manifestService.filesToParse(codebaseRoot, diff);
+        if (toParse.isEmpty()) {
+            return graphRepo.findAllClassNodes();
+        }
+        List<ClassNode> parsed = parserFacade.extractFiles(codebaseRoot, toParse, parserBackend);
+        persistGraph(parsed);
+        return graphRepo.findAllClassNodes();
+    }
+
+    private void persistGraph(List<ClassNode> classNodes) {
+        for (ClassNode classNode : classNodes) {
+            graphRepo.persistClassNode(classNode);
+            buildCallEdges(classNode);
+        }
+    }
+
+    private GraphBuildResult toBuildResult(List<ClassNode> classNodes, AnalysisResult analysisResult,
+                                           int embeddedMethods, int embeddedClasses, int communityCount,
+                                           ParserBackend parserBackend) {
 
         int totalMethods = classNodes.stream().mapToInt(c -> c.methods().size()).sum();
         int constructors = classNodes.stream()
@@ -147,6 +279,18 @@ public class SemanticGraphService {
                 parserBackend
         );
     }
+
+    public void saveQueryResult(String question, String answer, List<String> nodeFqns) {
+        graphRepo.persistQaResult(question, answer, nodeFqns);
+    }
+
+    public record GraphBuildOutcome(
+            GraphBuildResult result,
+            GraphDiffResult diff,
+            GraphAnalysisResult analysis,
+            TokenBenchmarkService.BenchmarkResult benchmark,
+            long durationMs
+    ) {}
 
     public ContextCompiler.CompiledContext compileContext(String methodId, int tokenBudget) {
         return contextCompiler.compile(new ContextCompiler.ContextRequest(methodId, tokenBudget));

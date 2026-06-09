@@ -395,10 +395,273 @@ public class SqliteGraphRepository implements GraphRepository {
             try (Statement st = conn.createStatement()) {
                 st.executeUpdate("DELETE FROM embeddings");
                 st.executeUpdate("DELETE FROM summaries");
+                st.executeUpdate("DELETE FROM community_meta");
+                st.executeUpdate("DELETE FROM qa_results");
+                st.executeUpdate("DELETE FROM hyperedges");
                 st.executeUpdate("DELETE FROM edges");
                 st.executeUpdate("DELETE FROM nodes");
             }
             return null;
+        });
+    }
+
+    @Override
+    public List<ClassNode> findAllClassNodes() {
+        return withReadConnection(conn -> {
+            List<ClassNode> nodes = new ArrayList<>();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT data FROM nodes WHERE kind = 'CLASS' AND (json_extract(data, '$.external') IS NULL OR json_extract(data, '$.external') = false)")) {
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        ClassNode node = readClassNode(rs.getString("data"));
+                        if (node != null) {
+                            nodes.add(node);
+                        }
+                    }
+                }
+            }
+            return nodes;
+        });
+    }
+
+    @Override
+    public List<String> listInternalClassFqns() {
+        return withReadConnection(conn -> {
+            List<String> fqns = new ArrayList<>();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT fqn FROM nodes WHERE kind = 'CLASS' AND (json_extract(data, '$.external') IS NULL OR json_extract(data, '$.external') = false) ORDER BY fqn")) {
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        fqns.add(rs.getString("fqn"));
+                    }
+                }
+            }
+            return fqns;
+        });
+    }
+
+    @Override
+    public void removeNodesByFilePaths(List<String> absoluteFilePaths) {
+        if (absoluteFilePaths.isEmpty()) {
+            return;
+        }
+        withWriteConnection(conn -> {
+            for (String filePath : absoluteFilePaths) {
+                List<String> classIds = new ArrayList<>();
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "SELECT id FROM nodes WHERE kind = 'CLASS' AND json_extract(data, '$.filePath') = ?")) {
+                    ps.setString(1, filePath);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next()) {
+                            classIds.add(rs.getString("id"));
+                        }
+                    }
+                }
+                for (String classId : classIds) {
+                    String classFqn = GraphNodeIds.fqnFromClassId(classId);
+                    List<String> methodIds = new ArrayList<>();
+                    try (PreparedStatement ps = conn.prepareStatement(
+                            "SELECT id FROM nodes WHERE kind = 'METHOD' AND fqn = ?")) {
+                        ps.setString(1, classFqn);
+                        try (ResultSet rs = ps.executeQuery()) {
+                            while (rs.next()) {
+                                methodIds.add(rs.getString("id"));
+                            }
+                        }
+                    }
+                    for (String methodId : methodIds) {
+                        deleteNode(conn, methodId);
+                    }
+                    deleteNode(conn, classId);
+                }
+            }
+            return null;
+        });
+    }
+
+    @Override
+    public void removeClassAndRelatedNodes(String fqn) {
+        withWriteConnection(conn -> {
+            deleteNode(conn, GraphNodeIds.classId(fqn));
+            try (PreparedStatement ps = conn.prepareStatement("DELETE FROM nodes WHERE kind = 'METHOD' AND fqn = ?")) {
+                ps.setString(1, fqn);
+                ps.executeUpdate();
+            }
+            return null;
+        });
+    }
+
+    @Override
+    public void setCommunityLabel(int communityId, String label, double cohesion) {
+        withWriteConnection(conn -> {
+            try (PreparedStatement ps = conn.prepareStatement("""
+                    INSERT INTO community_meta (community_id, label, cohesion)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(community_id) DO UPDATE SET label = excluded.label, cohesion = excluded.cohesion
+                    """)) {
+                ps.setInt(1, communityId);
+                ps.setString(2, label);
+                ps.setDouble(3, cohesion);
+                ps.executeUpdate();
+            }
+            return null;
+        });
+    }
+
+    @Override
+    public Optional<String> getCommunityLabel(int communityId) {
+        return withReadConnection(conn -> {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT label FROM community_meta WHERE community_id = ?")) {
+                ps.setInt(1, communityId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    return rs.next() ? Optional.of(rs.getString("label")) : Optional.empty();
+                }
+            }
+        });
+    }
+
+    @Override
+    public Optional<Double> getCommunityCohesion(int communityId) {
+        return withReadConnection(conn -> {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT cohesion FROM community_meta WHERE community_id = ?")) {
+                ps.setInt(1, communityId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    return rs.next() ? Optional.of(rs.getDouble("cohesion")) : Optional.empty();
+                }
+            }
+        });
+    }
+
+    @Override
+    public List<GraphEdgeRecord> listClassLevelEdges() {
+        return withReadConnection(conn -> {
+            List<GraphEdgeRecord> edges = new ArrayList<>();
+            try (PreparedStatement ps = conn.prepareStatement("SELECT type, from_id, to_id, weight, provenance, confidence_score FROM edges")) {
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        String from = rs.getString("from_id");
+                        String to = rs.getString("to_id");
+                        if (!from.startsWith("class:") || !to.startsWith("class:")) {
+                            continue;
+                        }
+                        edges.add(new GraphEdgeRecord(
+                                rs.getString("type"), from, to, rs.getDouble("weight"),
+                                EdgeProvenance.fromString(rs.getString("provenance")),
+                                rs.getDouble("confidence_score")));
+                    }
+                }
+            }
+            return edges;
+        });
+    }
+
+    @Override
+    public List<GraphEdgeRecord> listAllEdges() {
+        return withReadConnection(conn -> {
+            List<GraphEdgeRecord> edges = new ArrayList<>();
+            try (PreparedStatement ps = conn.prepareStatement("SELECT type, from_id, to_id, weight, provenance, confidence_score FROM edges")) {
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        edges.add(new GraphEdgeRecord(
+                                rs.getString("type"), rs.getString("from_id"), rs.getString("to_id"),
+                                rs.getDouble("weight"),
+                                EdgeProvenance.fromString(rs.getString("provenance")),
+                                rs.getDouble("confidence_score")));
+                    }
+                }
+            }
+            return edges;
+        });
+    }
+
+    @Override
+    public void persistQaResult(String question, String answer, List<String> nodeFqns) {
+        withWriteConnection(conn -> {
+            try (PreparedStatement ps = conn.prepareStatement("""
+                    INSERT INTO qa_results (question, answer, node_fqns, created_at)
+                    VALUES (?, ?, ?, ?)
+                    """)) {
+                ps.setString(1, question);
+                ps.setString(2, answer);
+                ps.setString(3, writeJson(nodeFqns));
+                ps.setLong(4, System.currentTimeMillis());
+                ps.executeUpdate();
+            }
+            return null;
+        });
+    }
+
+    @Override
+    public List<QaResultRecord> listQaResults() {
+        return withReadConnection(conn -> {
+            List<QaResultRecord> results = new ArrayList<>();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT id, question, answer, node_fqns FROM qa_results ORDER BY id")) {
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        List<String> nodes = objectMapper.readValue(
+                                rs.getString("node_fqns"), new TypeReference<List<String>>() {});
+                        results.add(new QaResultRecord(
+                                rs.getLong("id"), rs.getString("question"),
+                                rs.getString("answer"), nodes));
+                    }
+                }
+            } catch (Exception e) {
+                throw new IllegalStateException("Failed to read QA results", e);
+            }
+            return results;
+        });
+    }
+
+    @Override
+    public void persistHyperedge(String id, String label, String relation, List<String> nodeIds,
+                                 EdgeProvenance provenance, double confidence) {
+        withWriteConnection(conn -> {
+            try (PreparedStatement ps = conn.prepareStatement("""
+                    INSERT INTO hyperedges (id, label, relation, node_ids, provenance, confidence_score)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                      label = excluded.label,
+                      relation = excluded.relation,
+                      node_ids = excluded.node_ids,
+                      provenance = excluded.provenance,
+                      confidence_score = excluded.confidence_score
+                    """)) {
+                ps.setString(1, id);
+                ps.setString(2, label);
+                ps.setString(3, relation);
+                ps.setString(4, writeJson(nodeIds));
+                ps.setString(5, provenance.name());
+                ps.setDouble(6, confidence);
+                ps.executeUpdate();
+            }
+            return null;
+        });
+    }
+
+    @Override
+    public List<HyperedgeRecord> listHyperedges() {
+        return withReadConnection(conn -> {
+            List<HyperedgeRecord> results = new ArrayList<>();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT id, label, relation, node_ids, provenance, confidence_score FROM hyperedges")) {
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        List<String> nodeIds = objectMapper.readValue(
+                                rs.getString("node_ids"), new TypeReference<List<String>>() {});
+                        results.add(new HyperedgeRecord(
+                                rs.getString("id"), rs.getString("label"), rs.getString("relation"),
+                                nodeIds,
+                                EdgeProvenance.fromString(rs.getString("provenance")),
+                                rs.getDouble("confidence_score")));
+                    }
+                }
+            } catch (Exception e) {
+                throw new IllegalStateException("Failed to read hyperedges", e);
+            }
+            return results;
         });
     }
 
@@ -658,10 +921,50 @@ public class SqliteGraphRepository implements GraphRepository {
                     st.execute("CREATE INDEX IF NOT EXISTS idx_edges_to ON edges(to_id, type)");
                     st.execute("CREATE INDEX IF NOT EXISTS idx_nodes_community ON nodes(community_id)");
                     st.execute("CREATE INDEX IF NOT EXISTS idx_nodes_fqn ON nodes(fqn)");
+                    st.execute("""
+                            CREATE TABLE IF NOT EXISTS community_meta (
+                              community_id INTEGER PRIMARY KEY,
+                              label TEXT NOT NULL,
+                              cohesion REAL DEFAULT 0.0
+                            )
+                            """);
+                    st.execute("""
+                            CREATE TABLE IF NOT EXISTS qa_results (
+                              id INTEGER PRIMARY KEY AUTOINCREMENT,
+                              question TEXT NOT NULL,
+                              answer TEXT NOT NULL,
+                              node_fqns TEXT,
+                              created_at INTEGER
+                            )
+                            """);
+                    st.execute("""
+                            CREATE TABLE IF NOT EXISTS hyperedges (
+                              id TEXT PRIMARY KEY,
+                              label TEXT NOT NULL,
+                              relation TEXT NOT NULL,
+                              node_ids TEXT NOT NULL,
+                              provenance TEXT DEFAULT 'EXTRACTED',
+                              confidence_score REAL DEFAULT 1.0
+                            )
+                            """);
+                    migrateSchema(st);
                 }
             } catch (SQLException e) {
                 throw new IllegalStateException("Failed to initialize graph store at " + dbPath, e);
             }
+        }
+    }
+
+    private void migrateSchema(Statement st) throws SQLException {
+        try {
+            st.execute("ALTER TABLE edges ADD COLUMN provenance TEXT DEFAULT 'EXTRACTED'");
+        } catch (SQLException ignored) {
+            // column exists
+        }
+        try {
+            st.execute("ALTER TABLE edges ADD COLUMN confidence_score REAL DEFAULT 1.0");
+        } catch (SQLException ignored) {
+            // column exists
         }
     }
 
@@ -797,16 +1100,32 @@ public class SqliteGraphRepository implements GraphRepository {
         }
     }
 
+    @Override
+    public void insertEdge(String type, String fromId, String toId, double weight,
+                           EdgeProvenance provenance, double confidenceScore) {
+        withWriteConnection(conn -> {
+            insertEdge(conn, type, fromId, toId, weight, provenance, confidenceScore);
+            return null;
+        });
+    }
+
     private void insertEdge(Connection conn, String type, String fromId, String toId, double weight)
             throws SQLException {
+        insertEdge(conn, type, fromId, toId, weight, EdgeProvenance.EXTRACTED, 1.0);
+    }
+
+    private void insertEdge(Connection conn, String type, String fromId, String toId, double weight,
+                            EdgeProvenance provenance, double confidenceScore) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement("""
-                INSERT OR IGNORE INTO edges (type, from_id, to_id, weight)
-                VALUES (?, ?, ?, ?)
+                INSERT OR IGNORE INTO edges (type, from_id, to_id, weight, provenance, confidence_score)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """)) {
             ps.setString(1, type);
             ps.setString(2, fromId);
             ps.setString(3, toId);
             ps.setDouble(4, weight);
+            ps.setString(5, provenance.name());
+            ps.setDouble(6, confidenceScore);
             ps.executeUpdate();
         }
     }

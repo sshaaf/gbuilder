@@ -40,7 +40,7 @@ class GraphBuilderIntegrationTest {
         try {
             writeFixtureFiles(tempDir);
 
-            var result = graphService.buildGraph(tempDir);
+            var result = graphService.buildGraph(tempDir).result();
 
             assertEquals(5, result.typeCount(), "total type count");
 
@@ -115,7 +115,7 @@ class GraphBuilderIntegrationTest {
                 }
                 """);
 
-            var result = graphService.buildGraph(tempDir);
+            var result = graphService.buildGraph(tempDir).result();
 
             assertEquals(4, result.typeCount());
             assertEquals(8, result.methodCount());
@@ -156,7 +156,7 @@ class GraphBuilderIntegrationTest {
                 }
                 """);
 
-            var result = graphService.buildGraph(tempDir);
+            var result = graphService.buildGraph(tempDir).result();
             assertEquals(2, result.typeCount());
             assertEquals(1, result.importCount());
 
@@ -185,7 +185,7 @@ class GraphBuilderIntegrationTest {
                 }
                 """);
 
-            var result = graphService.buildGraph(tempDir);
+            var result = graphService.buildGraph(tempDir).result();
             assertEquals(1, result.typeCount());
             assertEquals(3, result.methodCount());
 
@@ -219,7 +219,7 @@ class GraphBuilderIntegrationTest {
         Path tempDir = Files.createTempDirectory("jparser-test-");
         try {
             writeFixtureFiles(tempDir);
-            var result = graphService.buildGraph(tempDir, ParserBackend.JPARSER);
+            var result = graphService.buildGraph(tempDir, ParserBackend.JPARSER).result();
 
             assertEquals(5, result.typeCount());
             assertEquals(ParserBackend.JPARSER, result.parserBackend());
@@ -247,7 +247,7 @@ class GraphBuilderIntegrationTest {
                 }
                 """);
 
-            var result = graphService.buildGraph(tempDir, ParserBackend.TREESITTER);
+            var result = graphService.buildGraph(tempDir, ParserBackend.TREESITTER).result();
 
             assertEquals(2, result.typeCount());
             assertEquals(ParserBackend.TREESITTER, result.parserBackend());
@@ -265,7 +265,7 @@ class GraphBuilderIntegrationTest {
         Path tempDir = Files.createTempDirectory("treesitter-metrics-");
         try {
             writeFixtureFiles(tempDir);
-            var result = graphService.buildGraph(tempDir, ParserBackend.TREESITTER);
+            var result = graphService.buildGraph(tempDir, ParserBackend.TREESITTER).result();
 
             assertEquals(5, result.typeCount());
             assertEquals(ParserBackend.TREESITTER, result.parserBackend());

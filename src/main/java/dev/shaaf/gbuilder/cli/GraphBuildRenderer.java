@@ -53,6 +53,39 @@ public class GraphBuildRenderer {
         out.println();
     }
 
+    public void renderBuildOutcome(SemanticGraphService.GraphBuildOutcome outcome) {
+        renderBuildResult(outcome.result(), outcome.durationMs());
+        if (outcome.diff() != null) {
+            section("Graph diff");
+            keyValue("Summary:", outcome.diff().summary());
+            if (!outcome.diff().addedTypes().isEmpty()) {
+                keyValue("Added types:", outcome.diff().addedTypes().size());
+            }
+            if (!outcome.diff().removedTypes().isEmpty()) {
+                keyValue("Removed types:", outcome.diff().removedTypes().size());
+            }
+            blank();
+        }
+        if (outcome.analysis() != null && !outcome.analysis().godNodes().isEmpty()) {
+            section("God nodes");
+            outcome.analysis().godNodes().stream().limit(5).forEach(g ->
+                    keyValue("  " + g.label() + ":", g.degree() + " connections"));
+            blank();
+        }
+        if (outcome.analysis() != null && !outcome.analysis().suggestedQuestions().isEmpty()) {
+            section("Suggested questions");
+            outcome.analysis().suggestedQuestions().forEach(q -> out.println("  • " + q));
+            blank();
+        }
+        if (outcome.benchmark() != null) {
+            section("Token benchmark");
+            keyValue("Summary:", outcome.benchmark().summary());
+            blank();
+        }
+        success("Outputs in .gbuilder/ (graph.db, GRAPH_REPORT.md, graph.json, graph.html)");
+        blank();
+    }
+
     public void renderBuildResult(SemanticGraphService.GraphBuildResult result, long durationMs) {
         section("Graph Build Complete");
         var k = result.kindBreakdown();
@@ -89,7 +122,6 @@ public class GraphBuildRenderer {
         }
 
         success("Knowledge graph persisted to embedded store (.gbuilder/graph.db)");
-        blank();
     }
 
     private void renderAnalysisResult(AnalysisResult analysis) {

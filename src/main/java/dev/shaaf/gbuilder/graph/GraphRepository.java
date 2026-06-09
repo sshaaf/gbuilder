@@ -83,4 +83,42 @@ public interface GraphRepository {
     Optional<String> getCommunitySummary(int communityId);
 
     Optional<ClassNode> findClassNode(String fqn);
+
+    List<ClassNode> findAllClassNodes();
+
+    List<String> listInternalClassFqns();
+
+    void removeNodesByFilePaths(List<String> absoluteFilePaths);
+
+    void removeClassAndRelatedNodes(String fqn);
+
+    void setCommunityLabel(int communityId, String label, double cohesion);
+
+    Optional<String> getCommunityLabel(int communityId);
+
+    Optional<Double> getCommunityCohesion(int communityId);
+
+    List<GraphEdgeRecord> listClassLevelEdges();
+
+    List<GraphEdgeRecord> listAllEdges();
+
+    void insertEdge(String type, String fromId, String toId, double weight,
+                    EdgeProvenance provenance, double confidenceScore);
+
+    void persistQaResult(String question, String answer, List<String> nodeFqns);
+
+    List<QaResultRecord> listQaResults();
+
+    void persistHyperedge(String id, String label, String relation,
+                          List<String> nodeIds, EdgeProvenance provenance, double confidence);
+
+    List<HyperedgeRecord> listHyperedges();
+
+    record GraphEdgeRecord(String type, String fromId, String toId, double weight,
+                           EdgeProvenance provenance, double confidenceScore) {}
+
+    record QaResultRecord(long id, String question, String answer, List<String> nodeFqns) {}
+
+    record HyperedgeRecord(String id, String label, String relation, List<String> nodeIds,
+                           EdgeProvenance provenance, double confidenceScore) {}
 }

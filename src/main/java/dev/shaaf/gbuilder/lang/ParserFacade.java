@@ -7,7 +7,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
+import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 @ApplicationScoped
@@ -28,6 +30,15 @@ public class ParserFacade {
 
     public List<ClassNode> extract(Path sourceRoot, ParserBackend backend) {
         return select(backend).extract(sourceRoot);
+    }
+
+    public List<ClassNode> extractFiles(Path sourceRoot, List<Path> files, ParserBackend backend) throws IOException {
+        ClassNodeExtractor extractor = select(backend);
+        List<ClassNode> nodes = new ArrayList<>();
+        for (Path file : files) {
+            nodes.addAll(extractor.extractFile(file));
+        }
+        return nodes;
     }
 
     public ClassNodeExtractor select(ParserBackend backend) {

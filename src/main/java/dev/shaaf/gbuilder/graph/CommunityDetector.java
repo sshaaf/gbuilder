@@ -3,6 +3,7 @@ package dev.shaaf.gbuilder.graph;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jgrapht.Graph;
+import org.jgrapht.alg.clustering.GirvanNewmanClustering;
 import org.jgrapht.alg.clustering.LabelPropagationClustering;
 import org.jgrapht.graph.DefaultUndirectedWeightedGraph;
 import org.jgrapht.graph.DefaultWeightedEdge;
@@ -29,6 +30,12 @@ public class CommunityDetector {
 
     @Inject
     GraphStoreLocation storeLocation;
+
+    private String clusteringAlgorithm = "label-propagation";
+
+    public void setClusteringAlgorithm(String clusteringAlgorithm) {
+        this.clusteringAlgorithm = clusteringAlgorithm == null ? "label-propagation" : clusteringAlgorithm;
+    }
 
     public Map<String, Integer> detectAndAssign() {
         Map<String, Integer> communities = detectCommunities();
@@ -69,13 +76,23 @@ public class CommunityDetector {
             }
         }
 
-        LabelPropagationClustering<String, DefaultWeightedEdge> clustering =
-                new LabelPropagationClustering<>(graph);
-        LabelPropagationClustering.Clustering<String> result = clustering.getClustering();
+        java.util.Collection<Set<String>> clusters = switch (clusteringAlgorithm.toLowerCase()) {
+            case "girvan-newman", "leiden" -> {
+                int targetClusters = Math.max(2, Math.min(10, graph.vertexSet().size() / 3));
+                GirvanNewmanClustering<String, DefaultWeightedEdge> gn =
+                        new GirvanNewmanClustering<>(graph, targetClusters);
+                yield gn.getClustering().getClusters();
+            }
+            default -> {
+                LabelPropagationClustering<String, DefaultWeightedEdge> lp =
+                        new LabelPropagationClustering<>(graph);
+                yield lp.getClustering().getClusters();
+            }
+        };
 
         Map<String, Integer> communities = new HashMap<>();
         int communityIndex = 0;
-        for (Set<String> community : result.getClusters()) {
+        for (Set<String> community : clusters) {
             for (String fqn : community) {
                 communities.put(fqn, communityIndex);
             }
