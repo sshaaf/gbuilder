@@ -1,0 +1,39 @@
+# Maven / Quarkus
+target/
+*.jar
+*.war
+*.ear
+*.class
+quarkus-artifact.properties
+
+# Embedded graph store (created when indexing a codebase)
+.gbuilder/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+.factorypath
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+*~
+
+# Env / secrets
+.env
+.env.*

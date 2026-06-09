@@ -1,0 +1,16 @@
+{
+  "id": "jaxws",
+  "name": "JAX-WS (SOAP Web Services)",
+  "category": "jaxws",
+  "match": {
+    "annotations": [
+      "WebService", "WebMethod", "WebParam", "WebResult",
+      "javax.jws.WebService", "javax.jws.WebMethod",
+      "jakarta.jws.WebService", "jakarta.jws.WebMethod",
+      "javax.xml.ws.WebServiceClient", "jakarta.xml.ws.WebServiceClient"
+    ],
+    "importPrefixes": ["javax.jws.", "javax.xml.ws.", "jakarta.jws.", "jakarta.xml.ws."],
+    "superClasses": [],
+    "interfaces": []
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "ejb",
+  "name": "Enterprise JavaBeans (EJB)",
+  "category": "ejb",
+  "match": {
+    "annotations": [
+      "Stateless", "Stateful", "Singleton", "MessageDriven",
+      "javax.ejb.Stateless", "javax.ejb.Stateful", "javax.ejb.Singleton", "javax.ejb.MessageDriven",
+      "jakarta.ejb.Stateless", "jakarta.ejb.Stateful", "jakarta.ejb.Singleton", "jakarta.ejb.MessageDriven"
+    ],
+    "importPrefixes": ["javax.ejb.", "jakarta.ejb."],
+    "superClasses": [],
+    "interfaces": []
+  }
+}

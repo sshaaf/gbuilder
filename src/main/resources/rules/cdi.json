@@ -1,0 +1,23 @@
+{
+  "id": "cdi",
+  "name": "Contexts and Dependency Injection (CDI)",
+  "category": "cdi",
+  "match": {
+    "annotations": [
+      "Inject", "ApplicationScoped", "RequestScoped", "SessionScoped",
+      "Dependent", "Produces", "Disposes", "Observes", "Named",
+      "javax.inject.Inject", "javax.enterprise.context.ApplicationScoped",
+      "javax.enterprise.context.RequestScoped", "javax.enterprise.context.SessionScoped",
+      "jakarta.inject.Inject", "jakarta.enterprise.context.ApplicationScoped",
+      "jakarta.enterprise.context.RequestScoped", "jakarta.enterprise.context.SessionScoped"
+    ],
+    "importPrefixes": [
+      "javax.inject.", "javax.enterprise.context.", "javax.enterprise.inject.",
+      "javax.enterprise.event.",
+      "jakarta.inject.", "jakarta.enterprise.context.", "jakarta.enterprise.inject.",
+      "jakarta.enterprise.event."
+    ],
+    "superClasses": [],
+    "interfaces": []
+  }
+}

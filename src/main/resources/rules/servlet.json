@@ -1,0 +1,18 @@
+{
+  "id": "servlet",
+  "name": "Servlet API",
+  "category": "servlet",
+  "match": {
+    "annotations": [
+      "WebServlet", "WebFilter", "WebListener",
+      "javax.servlet.annotation.WebServlet", "javax.servlet.annotation.WebFilter",
+      "jakarta.servlet.annotation.WebServlet", "jakarta.servlet.annotation.WebFilter"
+    ],
+    "importPrefixes": ["javax.servlet.", "jakarta.servlet."],
+    "superClasses": [
+      "javax.servlet.http.HttpServlet", "jakarta.servlet.http.HttpServlet",
+      "javax.servlet.GenericServlet", "jakarta.servlet.GenericServlet"
+    ],
+    "interfaces": []
+  }
+}

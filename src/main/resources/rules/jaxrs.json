@@ -1,0 +1,18 @@
+{
+  "id": "jaxrs",
+  "name": "JAX-RS (REST)",
+  "category": "jaxrs",
+  "match": {
+    "annotations": [
+      "Path", "GET", "POST", "PUT", "DELETE", "PATCH",
+      "Produces", "Consumes", "PathParam", "QueryParam",
+      "javax.ws.rs.Path", "javax.ws.rs.GET", "javax.ws.rs.POST",
+      "javax.ws.rs.PUT", "javax.ws.rs.DELETE",
+      "jakarta.ws.rs.Path", "jakarta.ws.rs.GET", "jakarta.ws.rs.POST",
+      "jakarta.ws.rs.PUT", "jakarta.ws.rs.DELETE"
+    ],
+    "importPrefixes": ["javax.ws.rs.", "jakarta.ws.rs."],
+    "superClasses": [],
+    "interfaces": []
+  }
+}

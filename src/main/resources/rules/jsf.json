@@ -1,0 +1,18 @@
+{
+  "id": "jsf",
+  "name": "JavaServer Faces (JSF)",
+  "category": "jsf",
+  "match": {
+    "annotations": [
+      "ManagedBean", "FacesConverter", "FacesValidator", "FacesComponent",
+      "FacesRenderer",
+      "javax.faces.bean.ManagedBean", "javax.faces.convert.FacesConverter",
+      "javax.faces.validator.FacesValidator",
+      "jakarta.faces.bean.ManagedBean", "jakarta.faces.convert.FacesConverter",
+      "jakarta.faces.validator.FacesValidator"
+    ],
+    "importPrefixes": ["javax.faces.", "jakarta.faces."],
+    "superClasses": [],
+    "interfaces": []
+  }
+}

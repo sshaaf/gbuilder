@@ -1,0 +1,14 @@
+{
+  "id": "jms",
+  "name": "Java Message Service (JMS)",
+  "category": "jms",
+  "match": {
+    "annotations": [
+      "JMSDestinationDefinition", "JMSConnectionFactoryDefinition",
+      "javax.jms.JMSDestinationDefinition", "jakarta.jms.JMSDestinationDefinition"
+    ],
+    "importPrefixes": ["javax.jms.", "jakarta.jms."],
+    "superClasses": [],
+    "interfaces": []
+  }
+}

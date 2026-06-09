@@ -1,0 +1,18 @@
+{
+  "id": "jpa",
+  "name": "Java Persistence API (JPA)",
+  "category": "jpa",
+  "match": {
+    "annotations": [
+      "Entity", "Table", "PersistenceContext", "PersistenceUnit",
+      "NamedQuery", "NamedQueries", "MappedSuperclass", "Embeddable",
+      "javax.persistence.Entity", "javax.persistence.Table",
+      "javax.persistence.PersistenceContext", "javax.persistence.PersistenceUnit",
+      "jakarta.persistence.Entity", "jakarta.persistence.Table",
+      "jakarta.persistence.PersistenceContext", "jakarta.persistence.PersistenceUnit"
+    ],
+    "importPrefixes": ["javax.persistence.", "jakarta.persistence."],
+    "superClasses": [],
+    "interfaces": []
+  }
+}
