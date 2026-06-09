@@ -1,4 +1,4 @@
-package com.ambitious.migration.agent.core.lang;
+package dev.shaaf.gbuilder.lang;
 
 import dev.shaaf.gbuilder.lang.Language;
 import org.junit.jupiter.api.Test;

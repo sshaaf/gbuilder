@@ -1,4 +1,4 @@
-package com.ambitious.migration.agent.graph.detection;
+package dev.shaaf.gbuilder.graph.detection;
 
 import dev.shaaf.gbuilder.graph.detection.JavaNamespaceDetector;
 import dev.shaaf.gbuilder.lang.Language;

@@ -1,4 +1,4 @@
-package com.ambitious.migration.agent.graph;
+package dev.shaaf.gbuilder.graph;
 
 import dev.shaaf.gbuilder.graph.EmbeddingService;
 import org.junit.jupiter.api.Test;

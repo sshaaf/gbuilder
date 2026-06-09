@@ -27,7 +27,7 @@ public class GraphBuildRenderer {
     public void banner() {
         out.println();
         out.println(BOLD + CYAN + "  ╔═══════════════════════════════════════════════╗" + RESET);
-        out.println(BOLD + CYAN + "  ║   Ambitious Graph — Code Knowledge Graph CLI  ║" + RESET);
+        out.println(BOLD + CYAN + "  ║   gbuilder — Code Knowledge Graph CLI          ║" + RESET);
         out.println(BOLD + CYAN + "  ╚═══════════════════════════════════════════════╝" + RESET);
         out.println();
     }

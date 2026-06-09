@@ -44,7 +44,7 @@ public class RuleLoader {
     private static final String CLASSPATH_RULES_DIR = "rules";
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    @ConfigProperty(name = "ambitious.analyzer.rules-dir")
+    @ConfigProperty(name = "gbuilder.analyzer.rules-dir")
     Optional<String> userRulesDir;
 
     @Inject

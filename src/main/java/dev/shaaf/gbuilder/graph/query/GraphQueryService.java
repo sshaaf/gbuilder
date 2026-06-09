@@ -1,5 +1,6 @@
 package dev.shaaf.gbuilder.graph.query;
 
+import dev.shaaf.gbuilder.graph.EmbeddingService;
 import dev.shaaf.gbuilder.graph.GraphRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -17,10 +18,13 @@ import java.util.Set;
 public class GraphQueryService {
 
     private static final Set<String> DEFAULT_EDGE_TYPES = Set.of(
-            "DEPENDS_ON", "CALLS", "EXTENDS", "IMPLEMENTS", "USES");
+            "DEPENDS_ON", "CALLS", "EXTENDS", "IMPLEMENTS", "USES", "SEMANTICALLY_SIMILAR");
 
     @Inject
     GraphRepository graphRepository;
+
+    @Inject
+    EmbeddingService embeddingService;
 
     public GraphQueryResult query(String question, boolean dfs, int tokenBudget) {
         List<String> seeds = resolveSeeds(question);
@@ -54,6 +58,24 @@ public class GraphQueryService {
 
         String text = truncateToTokenBudget(answer.toString(), tokenBudget);
         return new GraphQueryResult(question, new ArrayList<>(visited), text);
+    }
+
+    /**
+     * Resolve seed types from a pre-computed query embedding (used when embeddings are stored
+     * without requiring a live embedding API call).
+     */
+    public List<String> resolveSeedsFromVector(float[] queryVector, int limit) {
+        if (queryVector == null || queryVector.length == 0) {
+            return List.of();
+        }
+        return embeddingService.rankAgainstStoredEmbeddings(
+                        queryVector,
+                        graphRepository.listStoredEmbeddings(),
+                        limit,
+                        embeddingService.queryMinSimilarity())
+                .stream()
+                .map(EmbeddingService.SimilarityHit::classFqn)
+                .toList();
     }
 
     private void bfsVisit(List<String> seeds, Set<String> visited,
@@ -97,12 +119,31 @@ public class GraphQueryService {
     }
 
     private List<String> resolveSeeds(String question) {
+        List<String> byName = resolveSeedsByName(question);
+        if (!byName.isEmpty()) {
+            return byName;
+        }
+        return resolveSeedsByEmbedding(question);
+    }
+
+    private List<String> resolveSeedsByName(String question) {
         String normalized = question.toLowerCase(Locale.ROOT);
         return graphRepository.listInternalClassFqns().stream()
                 .filter(fqn -> normalized.contains(fqn.toLowerCase(Locale.ROOT))
                         || normalized.contains(simpleName(fqn).toLowerCase(Locale.ROOT)))
                 .limit(3)
                 .toList();
+    }
+
+    private List<String> resolveSeedsByEmbedding(String question) {
+        if (!embeddingService.isEnabled()) {
+            return List.of();
+        }
+        float[] queryVector = embeddingService.embedSingle(question);
+        if (queryVector.length == 0) {
+            return List.of();
+        }
+        return resolveSeedsFromVector(queryVector, 3);
     }
 
     private String simpleName(String fqn) {

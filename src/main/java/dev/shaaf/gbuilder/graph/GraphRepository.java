@@ -44,6 +44,12 @@ public interface GraphRepository {
 
     void storeMethodEmbedding(String signature, String className, float[] vector);
 
+    List<StoredEmbedding> listStoredEmbeddings();
+
+    record StoredEmbedding(String nodeId, String classFqn, EmbeddingKind kind, float[] vector) {}
+
+    enum EmbeddingKind { CLASS, METHOD }
+
     Map<String, Object> findMethodContext(String className, String methodSignature);
 
     List<Map<String, String>> findInternalCallSignatures(String className, List<String> callNames);

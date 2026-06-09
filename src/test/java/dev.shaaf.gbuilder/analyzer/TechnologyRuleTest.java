@@ -1,4 +1,4 @@
-package com.ambitious.migration.agent.analyzer;
+package dev.shaaf.gbuilder.analyzer;
 
 import dev.shaaf.gbuilder.analyzer.DeclarativeRule;
 import dev.shaaf.gbuilder.analyzer.RuleDefinition;

@@ -9,11 +9,14 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Wraps LangChain4j EmbeddingModel for single/batch embedding and cosine similarity.
- * When no embedding model is configured (ambitious.embedding.enabled=false or no API key),
+ * When no embedding model is configured (gbuilder.embedding.enabled=false or no API key),
  * all embed* methods return zero-length arrays, keeping the graph pipeline functional.
  */
 @ApplicationScoped
@@ -21,14 +24,28 @@ public class EmbeddingService {
 
     private static final Logger LOG = Logger.getLogger(EmbeddingService.class);
 
-    @ConfigProperty(name = "ambitious.embedding.enabled", defaultValue = "false")
+    @ConfigProperty(name = "gbuilder.embedding.enabled", defaultValue = "false")
     boolean embeddingEnabled;
 
-    @ConfigProperty(name = "ambitious.embedding.batch-size", defaultValue = "50")
+    @ConfigProperty(name = "gbuilder.embedding.batch-size", defaultValue = "50")
     int batchSize;
+
+    @ConfigProperty(name = "gbuilder.embedding.similarity-threshold", defaultValue = "0.80")
+    double similarityThreshold;
+
+    @ConfigProperty(name = "gbuilder.embedding.query-min-similarity", defaultValue = "0.65")
+    double queryMinSimilarity;
 
     @Inject
     Instance<EmbeddingModel> embeddingModelInstance;
+
+    public double similarityThreshold() {
+        return similarityThreshold;
+    }
+
+    public double queryMinSimilarity() {
+        return queryMinSimilarity;
+    }
 
     public boolean isEnabled() {
         return embeddingEnabled && embeddingModelInstance.isResolvable();
@@ -99,4 +116,34 @@ public class EmbeddingService {
         }
         return dotProduct / denominator;
     }
+
+    /**
+     * Rank stored class embeddings by cosine similarity to a query vector.
+     * Method embeddings contribute to their enclosing class (best score wins).
+     */
+    public List<SimilarityHit> rankAgainstStoredEmbeddings(
+            float[] queryVector,
+            List<GraphRepository.StoredEmbedding> embeddings,
+            int limit,
+            double minSimilarity) {
+        if (queryVector == null || queryVector.length == 0 || embeddings == null || embeddings.isEmpty()) {
+            return List.of();
+        }
+
+        Map<String, Double> bestPerClass = new HashMap<>();
+        for (GraphRepository.StoredEmbedding embedding : embeddings) {
+            double score = cosineSimilarity(queryVector, embedding.vector());
+            if (score >= minSimilarity) {
+                bestPerClass.merge(embedding.classFqn(), score, Math::max);
+            }
+        }
+
+        return bestPerClass.entrySet().stream()
+                .sorted(Map.Entry.<String, Double>comparingByValue(Comparator.reverseOrder()))
+                .limit(Math.max(1, limit))
+                .map(e -> new SimilarityHit(e.getKey(), e.getValue()))
+                .toList();
+    }
+
+    public record SimilarityHit(String classFqn, double score) {}
 }

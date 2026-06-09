@@ -249,6 +249,42 @@ public class SqliteGraphRepository implements GraphRepository {
     }
 
     @Override
+    public List<StoredEmbedding> listStoredEmbeddings() {
+        return withReadConnection(conn -> {
+            List<StoredEmbedding> results = new ArrayList<>();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT node_id, vector FROM embeddings")) {
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        String nodeId = rs.getString("node_id");
+                        float[] vector = fromBytes(rs.getBytes("vector"));
+                        if (vector.length == 0) {
+                            continue;
+                        }
+                        StoredEmbedding parsed = parseStoredEmbedding(nodeId, vector);
+                        if (parsed != null) {
+                            results.add(parsed);
+                        }
+                    }
+                }
+            }
+            return results;
+        });
+    }
+
+    private StoredEmbedding parseStoredEmbedding(String nodeId, float[] vector) {
+        if (nodeId.startsWith("class:")) {
+            return new StoredEmbedding(nodeId, GraphNodeIds.fqnFromClassId(nodeId),
+                    EmbeddingKind.CLASS, vector);
+        }
+        if (nodeId.startsWith("method:")) {
+            return new StoredEmbedding(nodeId, GraphNodeIds.classFqnFromMethodId(nodeId),
+                    EmbeddingKind.METHOD, vector);
+        }
+        return null;
+    }
+
+    @Override
     public Map<String, Object> findMethodContext(String className, String methodSignature) {
         return withReadConnection(conn -> {
             String methodId = GraphNodeIds.methodId(className, methodSignature);
@@ -1323,6 +1359,18 @@ public class SqliteGraphRepository implements GraphRepository {
             buffer.putFloat(v);
         }
         return buffer.array();
+    }
+
+    private float[] fromBytes(byte[] bytes) {
+        if (bytes == null || bytes.length == 0 || bytes.length % Float.BYTES != 0) {
+            return new float[0];
+        }
+        ByteBuffer buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
+        float[] vector = new float[bytes.length / Float.BYTES];
+        for (int i = 0; i < vector.length; i++) {
+            vector[i] = buffer.getFloat();
+        }
+        return vector;
     }
 
     private int estimateTokens(String text) {

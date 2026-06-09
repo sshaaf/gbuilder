@@ -8,6 +8,8 @@ import dev.shaaf.gbuilder.graph.model.ClassNode;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -16,6 +18,8 @@ import java.util.Set;
 @ApplicationScoped
 public class SemanticEdgeService {
 
+    private static final int MAX_SEMANTIC_EDGES = 50;
+
     @Inject
     GraphRepository graphRepository;
 
@@ -23,25 +27,59 @@ public class SemanticEdgeService {
     EmbeddingService embeddingService;
 
     public int addSemanticSimilarityEdges(List<ClassNode> classNodes) {
-        if (!embeddingService.isEnabled() || classNodes.size() < 2) {
-            return addHeuristicSimilarityEdges(classNodes);
+        List<GraphRepository.StoredEmbedding> classEmbeddings = graphRepository.listStoredEmbeddings().stream()
+                .filter(e -> e.kind() == GraphRepository.EmbeddingKind.CLASS)
+                .toList();
+        if (classEmbeddings.size() >= 2) {
+            return addEmbeddingSimilarityEdges(classEmbeddings);
         }
-        int added = 0;
-        for (int i = 0; i < classNodes.size(); i++) {
-            for (int j = i + 1; j < classNodes.size(); j++) {
-                ClassNode a = classNodes.get(i);
-                ClassNode b = classNodes.get(j);
-                if (samePackage(a, b) && similarShape(a, b)) {
-                    graphRepository.insertEdge(
-                            "SEMANTICALLY_SIMILAR",
-                            GraphNodeIds.classId(a.fullyQualifiedName()),
-                            GraphNodeIds.classId(b.fullyQualifiedName()),
-                            0.5,
-                            EdgeProvenance.INFERRED,
-                            0.75);
-                    added++;
+        if (classNodes.size() < 2) {
+            return 0;
+        }
+        return addHeuristicSimilarityEdges(classNodes);
+    }
+
+    private int addEmbeddingSimilarityEdges(List<GraphRepository.StoredEmbedding> embeddings) {
+        Set<String> internal = new HashSet<>(graphRepository.listInternalClassFqns());
+        List<SimilarPair> pairs = new ArrayList<>();
+        double threshold = embeddingService.similarityThreshold();
+
+        for (int i = 0; i < embeddings.size(); i++) {
+            for (int j = i + 1; j < embeddings.size(); j++) {
+                GraphRepository.StoredEmbedding a = embeddings.get(i);
+                GraphRepository.StoredEmbedding b = embeddings.get(j);
+                if (!internal.contains(a.classFqn()) || !internal.contains(b.classFqn())) {
+                    continue;
+                }
+                if (a.classFqn().equals(b.classFqn())) {
+                    continue;
+                }
+                double score = embeddingService.cosineSimilarity(a.vector(), b.vector());
+                if (score >= threshold) {
+                    pairs.add(new SimilarPair(a.classFqn(), b.classFqn(), score));
                 }
             }
+        }
+
+        pairs.sort(Comparator.comparingDouble(SimilarPair::score).reversed());
+        int added = 0;
+        Set<String> seen = new HashSet<>();
+        for (SimilarPair pair : pairs) {
+            if (added >= MAX_SEMANTIC_EDGES) {
+                break;
+            }
+            String key = pairKey(pair.a(), pair.b());
+            if (!seen.add(key)) {
+                continue;
+            }
+            graphRepository.insertEdge(
+                    "SEMANTICALLY_SIMILAR",
+                    GraphNodeIds.classId(pair.a()),
+                    GraphNodeIds.classId(pair.b()),
+                    pair.score(),
+                    EdgeProvenance.INFERRED,
+                    pair.score());
+            added++;
         }
         return added;
     }
@@ -69,7 +107,7 @@ public class SemanticEdgeService {
                 }
             }
         }
-        return Math.min(added, 50);
+        return Math.min(added, MAX_SEMANTIC_EDGES);
     }
 
     public void addTechnologyHyperedges(List<ClassNode> classNodes) {
@@ -93,16 +131,9 @@ public class SemanticEdgeService {
         }
     }
 
-    private boolean samePackage(ClassNode a, ClassNode b) {
-        return a.packageName().equals(b.packageName());
-    }
-
-    private boolean similarShape(ClassNode a, ClassNode b) {
-        return a.kind() == b.kind()
-                && Math.abs(a.methods().size() - b.methods().size()) <= 2;
-    }
-
     private String pairKey(String a, String b) {
         return a.compareTo(b) <= 0 ? a + "|" + b : b + "|" + a;
     }
+
+    private record SimilarPair(String a, String b, double score) {}
 }
