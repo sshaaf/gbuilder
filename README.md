@@ -23,6 +23,8 @@ java -jar target/gbuilder-*-runner.jar --help
 
 Pre-built **uber-jar** and **native** binaries (Linux, macOS, Windows) are attached to [GitHub Actions](.github/workflows/ci.yml) workflow runs.
 
+Each CI run also publishes **gbuilder-graph-outputs** — two zip files (JavaParser and Tree-sitter) containing a sample `.gbuilder/` directory: `graph.db`, `GRAPH_REPORT.md`, `graph.json`, `graph.html`, and `manifest.json`.
+
 ## Index a codebase
 
 ```bash
@@ -78,5 +80,3 @@ export OPENAI_API_KEY=sk-...
 ```bash
 mvn test -Dmaven.compiler.release=21
 ```
-
-Parser backend comparison (JavaParser vs Tree-sitter) runs as part of `mvn verify` and writes `target/parser-comparison/PARSER_COMPARISON.md` plus `docs/parser-comparison/report.md`. See [docs/parser-comparison/README.md](docs/parser-comparison/README.md).

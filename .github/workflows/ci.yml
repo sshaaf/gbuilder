@@ -50,16 +50,15 @@ jobs:
       - name: Run tests
         run: mvn verify ${{ env.MAVEN_ARGS }}
 
-      - name: Upload parser comparison report
-        uses: actions/upload-artifact@v7
+      - name: Publish parser comparison to job summary
         if: always()
-        with:
-          name: parser-comparison-report
-          path: |
-            target/parser-comparison/PARSER_COMPARISON.md
-            docs/parser-comparison/report.md
-          if-no-files-found: warn
-          retention-days: 90
+        run: |
+          report=docs/parser-comparison/report.md
+          if [ -f "$report" ]; then
+            cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Parser comparison report not found at $report" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   uberjar:
     name: Uber-jar
@@ -95,6 +94,81 @@ jobs:
           path: target/gbuilder-*-runner.jar
           if-no-files-found: error
           retention-days: 14
+
+  graph-outputs:
+    name: Graph outputs (sample)
+    needs: uberjar
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Install tree-sitter4j
+        run: |
+          git clone --depth 1 "${TREE_SITTER4J_REPO}" "${RUNNER_TEMP}/tree-sitter4j"
+          mvn -B -f "${RUNNER_TEMP}/tree-sitter4j/pom.xml" install -DskipTests
+
+      - name: Download uber-jar
+        uses: actions/download-artifact@v6
+        with:
+          name: gbuilder-uberjar
+          path: target
+
+      - name: Prepare sample codebase
+        run: |
+          FIXTURE="${RUNNER_TEMP}/coolstore-mini"
+          cp -R src/test/resources/parser-benchmark/coolstore-mini "${FIXTURE}"
+          echo "FIXTURE=${FIXTURE}" >> "${GITHUB_ENV}"
+
+      - name: Build graph and zip outputs (JavaParser)
+        run: |
+          JAR=$(ls target/gbuilder-*-runner.jar | head -1)
+          java -jar "${JAR}" -p "${FIXTURE}" --parser-backend jparser
+          mkdir -p target/graph-artifacts
+          test -f "${FIXTURE}/.gbuilder/graph.db"
+          test -f "${FIXTURE}/.gbuilder/GRAPH_REPORT.md"
+          test -f "${FIXTURE}/.gbuilder/graph.json"
+          test -f "${FIXTURE}/.gbuilder/graph.html"
+          test -f "${FIXTURE}/.gbuilder/manifest.json"
+          (cd "${FIXTURE}/.gbuilder" && zip -r "${GITHUB_WORKSPACE}/target/graph-artifacts/gbuilder-graph-jparser.zip" .)
+
+      - name: Build graph and zip outputs (Tree-sitter)
+        run: |
+          rm -rf "${FIXTURE}/.gbuilder"
+          JAR=$(ls target/gbuilder-*-runner.jar | head -1)
+          java -Dgbuilder.parse.parallel-threshold=9999 -jar "${JAR}" -p "${FIXTURE}" --parser-backend treesitter
+          test -f "${FIXTURE}/.gbuilder/graph.db"
+          (cd "${FIXTURE}/.gbuilder" && zip -r "${GITHUB_WORKSPACE}/target/graph-artifacts/gbuilder-graph-treesitter.zip" .)
+
+      - name: Upload graph output archives
+        uses: actions/upload-artifact@v7
+        with:
+          name: gbuilder-graph-outputs
+          path: target/graph-artifacts/*.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Note graph artifacts in job summary
+        run: |
+          {
+            echo "## Graph output archives"
+            echo ""
+            echo "Sample codebase: \`coolstore-mini\` (bundled test fixture)."
+            echo ""
+            echo "| Archive | Parser | Contents |"
+            echo "|---------|--------|----------|"
+            echo "| \`gbuilder-graph-jparser.zip\` | JavaParser | graph.db, GRAPH_REPORT.md, graph.json, graph.html, manifest.json |"
+            echo "| \`gbuilder-graph-treesitter.zip\` | Tree-sitter | same |"
+            echo ""
+            echo "Download **gbuilder-graph-outputs** from the Artifacts section of this workflow run."
+          } >> "${GITHUB_STEP_SUMMARY}"
 
   native:
     name: Native (${{ matrix.platform }})
