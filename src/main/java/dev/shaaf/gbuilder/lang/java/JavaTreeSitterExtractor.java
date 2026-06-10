@@ -120,7 +120,7 @@ public class JavaTreeSitterExtractor implements ClassNodeExtractor {
         String fqn = JavaFqnResolver.buildFqn(packageName, enclosingTypes, simpleName);
         ClassKind kind = resolveKind(typeNode.type());
         List<String> modifiers = TreeSitterSupport.extractModifiers(source, typeNode);
-        List<String> annotations = TreeSitterSupport.extractAnnotations(source, typeNode);
+        List<String> annotations = TreeSitterSupport.extractDirectAnnotations(source, typeNode);
         List<AnnotationNode> annotationNodes = annotations.stream()
                 .map(a -> new AnnotationNode(a, List.of()))
                 .toList();
@@ -247,7 +247,7 @@ public class JavaTreeSitterExtractor implements ClassNodeExtractor {
 
         String name = resolveMethodName(source, declarationNode, captureNodes, typeSimpleName, constructor);
         List<String> modifiers = TreeSitterQuerySupport.modifiersFromCapture(source, captureNodes, "modifiers");
-        List<String> annotations = TreeSitterSupport.extractAnnotations(source, declarationNode);
+        List<String> annotations = TreeSitterSupport.extractDirectAnnotations(source, declarationNode);
         List<AnnotationNode> annotationNodes = annotations.stream()
                 .map(a -> new AnnotationNode(a, List.of()))
                 .toList();

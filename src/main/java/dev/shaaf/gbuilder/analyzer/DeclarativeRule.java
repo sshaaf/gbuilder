@@ -47,13 +47,7 @@ public class DeclarativeRule implements TechnologyRule {
     }
 
     private boolean matchesAnnotations(ClassNode classNode) {
-        if (annotationSet.isEmpty()) return false;
-        for (var ann : classNode.annotationNodes()) {
-            if (annotationSet.contains(ann.name())) {
-                return true;
-            }
-        }
-        return false;
+        return AnnotationMatching.matchesAny(annotationSet, classNode);
     }
 
     private boolean matchesImports(ClassNode classNode) {

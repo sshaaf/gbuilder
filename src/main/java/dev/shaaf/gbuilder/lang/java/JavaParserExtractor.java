@@ -140,7 +140,7 @@ public class JavaParserExtractor implements ClassNodeExtractor {
         ClassKind kind = resolveKind(typeDecl);
         List<String> modifiers = extractModifiers(typeDecl);
         List<AnnotationNode> annotationNodes = extractAnnotationNodes(typeDecl);
-        List<String> annotations = annotationNodes.stream().map(AnnotationNode::name).toList();
+        List<String> annotations = extractAnnotationStrings(typeDecl);
         List<String> typeParameters = extractTypeParameters(typeDecl);
 
         String superClass = null;
@@ -248,7 +248,7 @@ public class JavaParserExtractor implements ClassNodeExtractor {
     private List<MethodNode> extractMethods(TypeDeclaration<?> typeDecl) {
         return typeDecl.getMethods().stream().map(md -> {
             List<AnnotationNode> annotNodes = extractAnnotationNodes(md);
-            List<String> annotStrings = annotNodes.stream().map(AnnotationNode::name).toList();
+            List<String> annotStrings = extractAnnotationStrings(md);
             List<ParameterNode> params = md.getParameters().stream()
                     .map(p -> new ParameterNode(
                             p.getTypeAsString(),
@@ -278,7 +278,7 @@ public class JavaParserExtractor implements ClassNodeExtractor {
     private List<MethodNode> extractConstructors(TypeDeclaration<?> typeDecl) {
         return typeDecl.getConstructors().stream().map(cd -> {
             List<AnnotationNode> annotNodes = extractAnnotationNodes(cd);
-            List<String> annotStrings = annotNodes.stream().map(AnnotationNode::name).toList();
+            List<String> annotStrings = extractAnnotationStrings(cd);
             List<ParameterNode> params = cd.getParameters().stream()
                     .map(p -> new ParameterNode(
                             p.getTypeAsString(),

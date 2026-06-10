@@ -148,15 +148,38 @@ public final class TreeSitterSupport {
         return List.of(text.split("\\s+"));
     }
 
-    public static List<String> extractAnnotations(String source, TreeSitterNode node) {
+    /**
+     * Annotations on the declaration itself (modifiers), excluding nested members.
+     */
+    public static List<String> extractDirectAnnotations(String source, TreeSitterNode declarationNode) {
         List<String> annotations = new ArrayList<>();
-        List<TreeSitterNode> annotationNodes = new ArrayList<>();
-        collectNodes(node, n -> "annotation".equals(n.type())
-                || "marker_annotation".equals(n.type()), annotationNodes);
-        for (TreeSitterNode annotationNode : annotationNodes) {
-            annotations.add(nodeText(source, annotationNode).trim());
+        TreeSitterNode body = findBody(declarationNode);
+        for (int i = 0; i < declarationNode.namedChildCount(); i++) {
+            TreeSitterNode child = declarationNode.namedChild(i);
+            if (child == null || child == body) {
+                continue;
+            }
+            if ("modifiers".equals(child.type())) {
+                appendAnnotationTexts(source, child, annotations);
+            } else if ("annotation".equals(child.type()) || "marker_annotation".equals(child.type())) {
+                annotations.add(nodeText(source, child).trim());
+            }
         }
         return annotations;
+    }
+
+    /** @deprecated prefer {@link #extractDirectAnnotations} for type/method declarations */
+    public static List<String> extractAnnotations(String source, TreeSitterNode node) {
+        return extractDirectAnnotations(source, node);
+    }
+
+    private static void appendAnnotationTexts(String source, TreeSitterNode modifiersNode, List<String> out) {
+        List<TreeSitterNode> annotationNodes = new ArrayList<>();
+        collectNodes(modifiersNode, n -> "annotation".equals(n.type())
+                || "marker_annotation".equals(n.type()), annotationNodes);
+        for (TreeSitterNode annotationNode : annotationNodes) {
+            out.add(nodeText(source, annotationNode).trim());
+        }
     }
 
     public static List<String> extractMethodInvocations(String source, TreeSitterNode methodNode) {

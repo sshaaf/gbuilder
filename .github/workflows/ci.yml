@@ -50,6 +50,17 @@ jobs:
       - name: Run tests
         run: mvn verify ${{ env.MAVEN_ARGS }}
 
+      - name: Upload parser comparison report
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: parser-comparison-report
+          path: |
+            target/parser-comparison/PARSER_COMPARISON.md
+            docs/parser-comparison/report.md
+          if-no-files-found: warn
+          retention-days: 90
+
   uberjar:
     name: Uber-jar
     needs: test

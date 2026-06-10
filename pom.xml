@@ -29,6 +29,8 @@
         <sqlite-jdbc.version>3.49.1.0</sqlite-jdbc.version>
         <jgrapht.version>1.5.2</jgrapht.version>
         <tree-sitter4j.version>999-SNAPSHOT</tree-sitter4j.version>
+        <gbuilder.parser-comparison.report-path>${project.build.directory}/parser-comparison/PARSER_COMPARISON.md</gbuilder.parser-comparison.report-path>
+        <gbuilder.parser-comparison.publish-path>docs/parser-comparison/report.md</gbuilder.parser-comparison.publish-path>
     </properties>
 
     <dependencyManagement>
@@ -172,6 +174,8 @@
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
                         <maven.home>${maven.home}</maven.home>
                         <gbuilder.expected.version>${project.version}</gbuilder.expected.version>
+                        <gbuilder.parser-comparison.report-path>${gbuilder.parser-comparison.report-path}</gbuilder.parser-comparison.report-path>
+                        <gbuilder.parser-comparison.publish-path>${gbuilder.parser-comparison.publish-path}</gbuilder.parser-comparison.publish-path>
                     </systemPropertyVariables>
                 </configuration>
             </plugin>

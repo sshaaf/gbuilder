@@ -78,3 +78,5 @@ export OPENAI_API_KEY=sk-...
 ```bash
 mvn test -Dmaven.compiler.release=21
 ```
+
+Parser backend comparison (JavaParser vs Tree-sitter) runs as part of `mvn verify` and writes `target/parser-comparison/PARSER_COMPARISON.md` plus `docs/parser-comparison/report.md`. See [docs/parser-comparison/README.md](docs/parser-comparison/README.md).

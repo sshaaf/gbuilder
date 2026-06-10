@@ -13,6 +13,7 @@ import dev.shaaf.gbuilder.graph.export.GraphExportService;
 import dev.shaaf.gbuilder.graph.manifest.GraphManifestService;
 import dev.shaaf.gbuilder.graph.report.GraphReportGenerator;
 import dev.shaaf.gbuilder.graph.semantic.SemanticEdgeService;
+import dev.shaaf.gbuilder.graph.model.AnnotationCounts;
 import dev.shaaf.gbuilder.graph.model.ClassKind;
 import dev.shaaf.gbuilder.graph.model.ClassNode;
 import dev.shaaf.gbuilder.graph.model.FieldNode;
@@ -314,7 +315,7 @@ public class SemanticGraphService {
         int totalFields = classNodes.stream().mapToInt(c -> c.fields().size()).sum();
         int totalImports = classNodes.stream().mapToInt(c -> c.imports().size()).sum();
         int totalAnnotations = classNodes.stream()
-                .mapToInt(c -> c.annotations().size()).sum();
+                .mapToInt(AnnotationCounts::totalForClass).sum();
         int enumConstants = classNodes.stream().mapToInt(c -> c.enumConstants().size()).sum();
         int recordComponents = classNodes.stream().mapToInt(c -> c.recordComponents().size()).sum();
 
